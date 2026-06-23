@@ -30,22 +30,30 @@ function showNickModal() {
 }
 async function saveNickFromModal() {
   const n = $("nickInput").value.trim().slice(0, 20);
+  const err = $("nickErr");
+  err.style.display = "none";
   if (!n) return;
-  const prev = getNick();
+  // Validate against the server (also relabels any existing rows). This is the
+  // single source of truth for what's allowed, so first-timers and renames both
+  // get checked here.
+  try {
+    const r = await fetch("/api/player/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playerId: getPlayerId(), nickname: n }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      err.textContent = d.error || "that nickname isn't allowed — pick another";
+      err.style.display = "block";
+      return; // keep the modal open
+    }
+  } catch {
+    /* network hiccup — let them through; submit will re-check */
+  }
   setNick(n);
   $("whoName").textContent = n;
   $("nickModal").classList.remove("show");
-  if (prev && prev !== n) {
-    try {
-      await fetch("/api/player/rename", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId: getPlayerId(), nickname: n }),
-      });
-    } catch {
-      /* non-fatal */
-    }
-  }
   if (current) loadLeaderboard(current.date);
 }
 

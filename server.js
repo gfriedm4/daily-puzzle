@@ -196,6 +196,71 @@ const SAFETY_SETTINGS = [
 
 const MODERATION_INSTRUCTION = `You screen prompts for a family-friendly drawing game where players describe simple flat shapes to recreate a target picture. Reject a prompt only if it describes sexual content, graphic violence or gore, hateful or harassing content, or anything clearly inappropriate for a general audience. Harmless but off-topic prompts are fine. Reply with exactly one word: ALLOW or BLOCK.`;
 
+// Deterministic first-pass denylist: exact-term matches for known hate symbols
+// and slurs, checked before the LLM moderator so the named cases are airtight
+// even if the classifier has an off day. Light leetspeak folding defeats the
+// obvious "n4zi" dodges. This catches NAMED terms only; geometric obfuscation
+// (describing a symbol without naming it) still leans on the moderator. Edit the
+// list to tune.
+const DENY_PATTERNS = [
+  /\bswastika\b/,
+  /\bswastica\b/,
+  /\bnazi/,
+  /\bhitler\b/,
+  /\bsieg\s*heil\b/,
+  /\bheil\s*hitler\b/,
+  /\bkkk\b/,
+  /\bku\s*klux\s*klan\b/,
+  /\bklan\b/,
+  /\bwhite\s*power\b/,
+  /\bwhite\s*supremac/,
+  /\bss\s*bolts?\b/,
+  /\bconfederate\s*flag\b/,
+];
+
+function denylisted(prompt) {
+  return DENY_PATTERNS.some((re) => re.test(leetFold(prompt)));
+}
+
+function leetFold(s) {
+  return s
+    .toLowerCase()
+    .replace(/[4@]/g, "a")
+    .replace(/3/g, "e")
+    .replace(/[1!|]/g, "i")
+    .replace(/0/g, "o")
+    .replace(/[$5]/g, "s")
+    .replace(/7/g, "t");
+}
+
+// Nicknames are free text on a public board, so they get their own profanity
+// gate. We collapse to letters/digits only (leet-folded) so "f.u.c.k" and
+// "b_i_t_c_h" can't slip through, then substring-match a curated list. Terms are
+// chosen long/unambiguous to avoid the Scunthorpe problem; hate terms reuse the
+// prompt denylist. Not exhaustive by design — the admin remove endpoint is the
+// backstop for anything creative that gets past it.
+// Safe as substrings: these don't appear inside common innocent words, so we
+// match them even through separators (collapsed form catches "f.u.c.k").
+const NICK_COLLAPSE_DENY = [
+  "fuck", "shit", "bitch", "cunt", "asshole", "dickhead", "motherfucker",
+  "pussy", "faggot", "nigger", "nigga", "whore", "slut", "blowjob", "handjob",
+  "cumshot", "jizz", "kike", "wetback", "tranny", "molest", "pedophile",
+];
+// Scunthorpe-prone: would wrongly flag therapist/grape/despicable/raccoon/
+// torpedo as substrings, so these need a word boundary instead.
+const NICK_WORD_DENY = [
+  /\brape\b/, /\brapist\b/, /\bspic\b/, /\bcoon/, /\bpedo/, /\bchink/,
+  /\bporn/, /\bretard/, /\bcum\b/,
+];
+
+function nicknameAllowed(nick) {
+  if (denylisted(nick)) return false;
+  const folded = leetFold(nick);
+  if (NICK_WORD_DENY.some((re) => re.test(folded))) return false;
+  const collapsed = folded.replace(/[^a-z0-9]/g, "");
+  return !NICK_COLLAPSE_DENY.some((term) => collapsed.includes(term));
+}
+
 // Quick classification pass on the player's prompt before we spend a render on
 // it. The render call carries the same SAFETY_SETTINGS as a hard backstop, so on
 // a transient moderator error we fail open and let the engine's filter catch it.
@@ -303,6 +368,11 @@ app.post("/api/generate", async (req, res) => {
   if (!GEMINI_API_KEY)
     return res.status(503).json({ error: "engine offline: GEMINI_API_KEY not set" });
 
+  if (denylisted(prompt))
+    return res
+      .status(400)
+      .json({ error: "that prompt isn't allowed, try describing the picture" });
+
   const moderation = await moderatePrompt(prompt);
   if (!moderation.allowed)
     return res
@@ -351,6 +421,8 @@ app.post("/api/leaderboard/submit", (req, res) => {
   const nickname = cleanNickname(req.body?.nickname);
   const playerId = String(req.body?.playerId || "");
   if (!nickname) return res.status(400).json({ error: "nickname required" });
+  if (!nicknameAllowed(nickname))
+    return res.status(400).json({ error: "that nickname isn't allowed — pick another" });
   if (!playerId) return res.status(400).json({ error: "playerId required" });
   const scored = scoreTokens.get(token);
   if (!scored) return res.status(400).json({ error: "invalid or used token" });
@@ -381,6 +453,8 @@ app.post("/api/player/rename", (req, res) => {
   const nickname = cleanNickname(req.body?.nickname);
   if (!playerId) return res.status(400).json({ error: "playerId required" });
   if (!nickname) return res.status(400).json({ error: "nickname required" });
+  if (!nicknameAllowed(nickname))
+    return res.status(400).json({ error: "that nickname isn't allowed — pick another" });
   let changed = 0;
   for (const rows of Object.values(leaderboard)) {
     for (const r of rows) {
@@ -392,6 +466,38 @@ app.post("/api/player/rename", (req, res) => {
   }
   if (changed) persistLeaderboard();
   res.json({ ok: true, changed });
+});
+
+// Admin backstop: remove a single row, or clear a whole day's board. Guarded by
+// the ADMIN_TOKEN env var (set it in .env); disabled if unset. Use to pull a
+// nickname that slipped the filter, or to wipe test data before launch.
+//   curl -X POST https://wordshot.art/api/admin/remove \
+//     -H "x-admin-token: $ADMIN_TOKEN" -H "content-type: application/json" \
+//     -d '{"date":"2026-06-23","nickname":"ross_test"}'   # one row
+//     -d '{"date":"2026-06-23"}'                            # whole day
+app.post("/api/admin/remove", (req, res) => {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token) return res.status(503).json({ error: "admin disabled: ADMIN_TOKEN not set" });
+  if (req.get("x-admin-token") !== token)
+    return res.status(403).json({ error: "forbidden" });
+
+  const date = String(req.body?.date || "");
+  const nickname = req.body?.nickname;
+  const playerId = req.body?.playerId;
+  if (!date || !leaderboard[date])
+    return res.status(404).json({ error: "no such day" });
+
+  const before = leaderboard[date].length;
+  if (nickname == null && playerId == null) {
+    delete leaderboard[date]; // clear the whole day
+  } else {
+    leaderboard[date] = leaderboard[date].filter(
+      (r) => r.nickname !== nickname && r.playerId !== playerId
+    );
+  }
+  persistLeaderboard();
+  const after = leaderboard[date]?.length ?? 0;
+  res.json({ ok: true, removed: before - after });
 });
 
 app.listen(PORT, () => {
