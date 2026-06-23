@@ -223,11 +223,11 @@ async function loadDay(date) {
   const { name, today } = current;
   $("lbPuzzle").textContent = `· ${today ? "Today" : current.date} · ${name}`;
 
-  // practice vs live framing
+  // Past days are view-only: the board still shows that day's results, but a
+  // late play is scored without being added.
   $("practiceTag").style.display = today ? "none" : "inline-block";
   $("practiceNote").style.display = today ? "none" : "block";
-  $("lbGrid").style.display = today ? "" : "none";
-  if (today) loadLeaderboard(current.date);
+  loadLeaderboard(current.date);
 
   const svg = await (await fetch(`/api/target/${current.puzzleId}`)).text();
   await drawSvg(tctx, svg);

@@ -101,11 +101,12 @@ There's one puzzle per day. Puzzles cycle by day from a fixed epoch (`EPOCH` in
 backdated as the most recent past days. The day picker lists today plus the
 archive, newest first.
 
-You can play any past day for practice, but only *today's* puzzle feeds the
-leaderboard. That rule is enforced server-side, not just hidden in the UI: the
-score token is bound to the day it was played, and `/api/leaderboard/submit`
-rejects any token whose day isn't today. So a past day still scores and shows
-your result, but it can't reach the board.
+You can play any past day for practice, and a past day still shows its
+leaderboard (how that day finished). What a late play can't do is get *added* to
+it. That rule is enforced server-side, not just hidden in the UI: the score token
+is bound to the day it was played, and `/api/leaderboard/submit` rejects any
+token whose day isn't today. So a past day still scores, shows your result, and
+offers the share card, but the historical board stays read-only.
 
 Boards are keyed by *date*, not by puzzle, because the same puzzle recurs every
 six days as the cycle wraps; keying by date keeps each day's competition its own.
