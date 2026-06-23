@@ -302,19 +302,33 @@ function denylisted(prompt) {
   return DENY_PATTERNS.some((re) => re.test(leetFold(prompt)));
 }
 
+// Consonant skeleton: the word with vowels stripped. "circle" -> "crcl".
+const devowel = (s) =>
+  String(s).toLowerCase().replace(/[^a-z]/g, "").replace(/[aeiou]/g, "");
+
 // Password-style twist: each puzzle bans the obvious name(s) of what it draws,
-// so players have to describe it sideways. Matching is whole-word and tolerant
-// of common inflections — "dot" catches "dots", "ring" catches "rings"/"ringed"
-// — but stays inside word boundaries, so "star" won't trip "start" or "starfish".
+// so players have to describe it sideways. Two passes:
+//   1. Normal spelling, inflection-tolerant, whole-word — "dot" catches "dots"
+//      and "ringed" but stays inside word boundaries, so "star" won't trip
+//      "start" or "starfish".
+//   2. Devoweled disguise — players abbreviate ("blk crcl" for "black circle"),
+//      which slips past pass 1. We compare consonant skeletons, but only against
+//      tokens the player actually stripped of vowels (none left). That guard is
+//      what keeps normal words safe: "data" and "range" keep their vowels, so
+//      they never collide with "dot" ("dt") or "ring" ("rng").
 // Returns the banned base word that was used, or null if the prompt is clean.
 function bannedWordHit(prompt, banned) {
   if (!Array.isArray(banned) || !banned.length) return null;
   const text = prompt.toLowerCase();
+  const tokens = text.split(/[^a-z]+/).filter(Boolean);
   for (const word of banned) {
     const base = String(word).toLowerCase().replace(/[^a-z]/g, "");
     if (!base) continue;
     const re = new RegExp(`\\b${base}(?:s|es|ed|ing|er|ers|y|ies)?\\b`, "i");
     if (re.test(text)) return word;
+    const skel = devowel(base);
+    if (skel.length >= 2 && tokens.some((t) => !/[aeiou]/.test(t) && t === skel))
+      return word;
   }
   return null;
 }

@@ -11,14 +11,23 @@ let current = null; // the selected day object
 
 // Mirror of the server's banned-word matcher so we can warn the player before
 // they spend their one shot. The server stays the source of truth; this is UX.
+// Pass 1 is normal spelling; pass 2 catches devoweled abbreviations ("crcl")
+// without tripping normal vowel-bearing words. Keep in sync with server.js.
+const devowel = (s) =>
+  String(s).toLowerCase().replace(/[^a-z]/g, "").replace(/[aeiou]/g, "");
+
 function bannedWordHit(prompt, banned) {
   if (!Array.isArray(banned) || !banned.length) return null;
   const text = (prompt || "").toLowerCase();
+  const tokens = text.split(/[^a-z]+/).filter(Boolean);
   for (const word of banned) {
     const base = String(word).toLowerCase().replace(/[^a-z]/g, "");
     if (!base) continue;
     const re = new RegExp(`\\b${base}(?:s|es|ed|ing|er|ers|y|ies)?\\b`, "i");
     if (re.test(text)) return word;
+    const skel = devowel(base);
+    if (skel.length >= 2 && tokens.some((t) => !/[aeiou]/.test(t) && t === skel))
+      return word;
   }
   return null;
 }
