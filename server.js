@@ -248,7 +248,7 @@ function dayList() {
   for (let i = dayIndex(today); i >= 0 && out.length < 60; i--) {
     const d = new Date(dayMs(EPOCH) + i * DAY_MS).toISOString().slice(0, 10);
     const p = wrap(i);
-    out.push({ date: d, puzzleId: p.id, name: p.name, day: i + 1, today: d === today });
+    out.push({ date: d, puzzleId: p.id, name: p.name, banned: p.banned || [], day: i + 1, today: d === today });
   }
   return out;
 }
@@ -300,6 +300,23 @@ const DENY_PATTERNS = [
 
 function denylisted(prompt) {
   return DENY_PATTERNS.some((re) => re.test(leetFold(prompt)));
+}
+
+// Password-style twist: each puzzle bans the obvious name(s) of what it draws,
+// so players have to describe it sideways. Matching is whole-word and tolerant
+// of common inflections — "dot" catches "dots", "ring" catches "rings"/"ringed"
+// — but stays inside word boundaries, so "star" won't trip "start" or "starfish".
+// Returns the banned base word that was used, or null if the prompt is clean.
+function bannedWordHit(prompt, banned) {
+  if (!Array.isArray(banned) || !banned.length) return null;
+  const text = prompt.toLowerCase();
+  for (const word of banned) {
+    const base = String(word).toLowerCase().replace(/[^a-z]/g, "");
+    if (!base) continue;
+    const re = new RegExp(`\\b${base}(?:s|es|ed|ing|er|ers|y|ies)?\\b`, "i");
+    if (re.test(text)) return word;
+  }
+  return null;
 }
 
 function leetFold(s) {
@@ -533,6 +550,16 @@ app.post("/api/generate", ...generateLimits, async (req, res) => {
     return res.status(400).json({ error: "prompt too long (max 600 chars)" });
   if (!GEMINI_API_KEY)
     return res.status(503).json({ error: "engine offline: GEMINI_API_KEY not set" });
+
+  // Banned-word gate runs before the LLM moderation pass — it's a cheap local
+  // check and there's no reason to spend a render on a prompt that breaks the
+  // password rule. Names the offending word so the player can rephrase.
+  const banHit = bannedWordHit(prompt, puzzle.banned);
+  if (banHit)
+    return res.status(400).json({
+      error: `can't use "${banHit}" on this one — describe it another way`,
+      bannedWord: banHit,
+    });
 
   if (denylisted(prompt))
     return res
