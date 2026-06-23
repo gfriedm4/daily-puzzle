@@ -7,9 +7,25 @@ const rctx = resultCanvas.getContext("2d");
 
 let currentPuzzle = null;
 
-// One-shot gate: once you've played a puzzle, your attempt is saved here and the
-// input locks. It's the Wordle model — clearable in devtools, but honest players
-// get one try. Real anti-cheat waits for accounts + a leaderboard.
+// --- Nickname (casual identity, localStorage, no login) ---
+const NICK_KEY = "dp:nick";
+const getNick = () => localStorage.getItem(NICK_KEY) || "";
+const setNick = (n) => localStorage.setItem(NICK_KEY, n);
+
+function showNickModal() {
+  $("nickInput").value = getNick();
+  $("nickModal").classList.add("show");
+  $("nickInput").focus();
+}
+function saveNickFromModal() {
+  const n = $("nickInput").value.trim().slice(0, 20);
+  if (!n) return;
+  setNick(n);
+  $("whoName").textContent = n;
+  $("nickModal").classList.remove("show");
+}
+
+// --- One-shot gate: one attempt per puzzle, saved locally, locks the input ---
 const saveKey = (id) => `dp:v1:${id}`;
 const getAttempt = (id) => {
   try {
@@ -21,8 +37,6 @@ const getAttempt = (id) => {
 const saveAttempt = (id, a) =>
   localStorage.setItem(saveKey(id), JSON.stringify(a));
 
-// Paint an SVG string onto a canvas over white (display only — scoring is the
-// server's job now).
 function drawSvg(ctx, svg) {
   return new Promise((resolve, reject) => {
     ctx.fillStyle = "#ffffff";
@@ -44,32 +58,66 @@ function setLocked(locked, note) {
   if (locked && note) $("prompt").placeholder = note;
 }
 
+function starsFor(score) {
+  return score >= 95 ? "🟩🟩🟩🟩🟩"
+    : score >= 90 ? "🟩🟩🟩🟩⬜"
+    : score >= 80 ? "🟩🟩🟩⬜⬜"
+    : score >= 65 ? "🟩🟩⬜⬜⬜"
+    : score >= 50 ? "🟩⬜⬜⬜⬜"
+    : "⬜⬜⬜⬜⬜";
+}
+
 async function showResult(svg, score, chars, name) {
   $("resultPh").style.display = "none";
   resultCanvas.style.display = "block";
   await drawSvg(rctx, svg);
   $("resultTag").textContent = `${chars} chars`;
   const p = score.toFixed(1);
-  const stars =
-    score >= 95 ? "🟩🟩🟩🟩🟩"
-    : score >= 90 ? "🟩🟩🟩🟩⬜"
-    : score >= 80 ? "🟩🟩🟩⬜⬜"
-    : score >= 65 ? "🟩🟩⬜⬜⬜"
-    : score >= 50 ? "🟩⬜⬜⬜⬜"
-    : "⬜⬜⬜⬜⬜";
   $("result").innerHTML = `
     <div class="score">
       <span class="big">${p}%</span>
       <span class="meta">match · ${chars} chars</span>
     </div>
-    <div class="share">Daily Puzzle — ${name}\n${stars}  ${p}%  ·  ${chars} chars</div>`;
+    <div class="share">Daily Puzzle — ${name}\n${starsFor(score)}  ${p}%  ·  ${chars} chars</div>`;
+}
+
+function renderLeaderboard(top) {
+  const me = getNick();
+  const list = $("lbList");
+  if (!top || !top.length) {
+    list.innerHTML = `<li class="lb-empty">No scores yet. Be first.</li>`;
+    return;
+  }
+  list.innerHTML = top
+    .map((r, i) => {
+      const mine = r.nickname === me ? " me" : "";
+      const nick = r.nickname.replace(/[<>&]/g, "");
+      return `<li class="${mine.trim()}">
+        <span class="rank">${i + 1}</span>
+        <span class="nick">${nick}</span>
+        <span class="pct">${r.score.toFixed(1)}%</span>
+        <span class="ch">${r.chars} ch</span>
+      </li>`;
+    })
+    .join("");
+}
+
+async function loadLeaderboard(id) {
+  try {
+    const { top } = await (await fetch(`/api/leaderboard/${id}`)).json();
+    renderLeaderboard(top);
+  } catch {
+    /* leave whatever's there */
+  }
 }
 
 async function loadPuzzle(id) {
   currentPuzzle = id;
   const name = $("puzzle").selectedOptions[0]?.textContent || "";
+  $("lbPuzzle").textContent = `· ${name}`;
   const svg = await (await fetch(`/api/target/${id}`)).text();
   await drawSvg(tctx, svg);
+  loadLeaderboard(id);
 
   const prior = getAttempt(id);
   if (prior) {
@@ -90,7 +138,8 @@ async function loadPuzzle(id) {
 }
 
 async function paint() {
-  if (getAttempt(currentPuzzle)) return; // already played
+  if (getAttempt(currentPuzzle)) return;
+  if (!getNick()) return showNickModal();
   const prompt = $("prompt").value.trim();
   if (!prompt) return;
   const btn = $("paint");
@@ -106,10 +155,24 @@ async function paint() {
     if (!res.ok) throw new Error(data.error || `error ${res.status}`);
 
     const name = $("puzzle").selectedOptions[0]?.textContent || "";
-    const attempt = { prompt, svg: data.svg, score: data.score, chars: data.chars };
-    saveAttempt(currentPuzzle, attempt);
+    saveAttempt(currentPuzzle, {
+      prompt,
+      svg: data.svg,
+      score: data.score,
+      chars: data.chars,
+    });
     setLocked(true, "You've already played this one.");
     await showResult(data.svg, data.score, data.chars, name);
+
+    // Hand the server-issued token back with our nickname to claim a row.
+    if (data.token) {
+      const r = await fetch("/api/leaderboard/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: data.token, nickname: getNick() }),
+      });
+      if (r.ok) renderLeaderboard((await r.json()).top);
+    }
   } catch (e) {
     $("result").innerHTML = `<span class="err">${e.message}</span>`;
     btn.disabled = false;
@@ -131,7 +194,18 @@ async function init() {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") paint();
   });
 
+  $("whoName").textContent = getNick() || "guest";
+  $("changeNick").addEventListener("click", (e) => {
+    e.preventDefault();
+    showNickModal();
+  });
+  $("nickSave").addEventListener("click", saveNickFromModal);
+  $("nickInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") saveNickFromModal();
+  });
+
   if (list.length) await loadPuzzle(list[0].id);
+  if (!getNick()) showNickModal();
 }
 
 init();

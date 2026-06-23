@@ -10,7 +10,7 @@
   <div class="wrap">
     <header>
       <h1>Daily Puzzle <span class="sub">prototype</span></h1>
-      <div class="sub">one shot · shortest prompt wins</div>
+      <div class="who">Playing as <b id="whoName">…</b> <a href="#" id="changeNick">change</a></div>
     </header>
     <p class="tagline">
       On the left is the target. Describe it in words, the engine paints what you say, and you're scored on how close it lands. You get one shot, so make every word count.
@@ -42,10 +42,25 @@
 
     <div class="result" id="result"></div>
 
+    <div class="leaderboard">
+      <div class="lb-head">Leaderboard <span class="sub" id="lbPuzzle"></span></div>
+      <ol id="lbList" class="lb-list"><li class="lb-empty">No scores yet. Be first.</li></ol>
+    </div>
+
     <p class="hint">
       The engine only knows flat shapes: circles, squares, triangles, stars. It can't see the target, only your words. One shot per puzzle, so make it count.
     </p>
   </div>
+
+  <div class="modal" id="nickModal">
+    <div class="card">
+      <h2>Pick a nickname</h2>
+      <p>It shows up on the leaderboard. No login.</p>
+      <input id="nickInput" maxlength="20" placeholder="e.g. triangle_wizard" />
+      <button id="nickSave" class="primary">Start playing</button>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>

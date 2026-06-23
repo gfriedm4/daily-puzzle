@@ -1,7 +1,7 @@
 import express from "express";
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Resvg } from "@resvg/resvg-js";
@@ -69,12 +69,64 @@ const resultCache = new Map();
 const cacheKey = (puzzleId, prompt) =>
   createHash("sha256").update(`${puzzleId}\n${prompt}`).digest("hex");
 
+// Leaderboard. Trust model: the client never sends us a score. When /api/generate
+// scores a painting it issues a one-time token bound to that server-computed
+// score; submitting to the board exchanges the token for a row. So a player can
+// pick any nickname, but the number next to it is one the server actually
+// measured. Persistence is a flat JSON file, fine at prototype scale.
+const DATA_DIR = join(__dirname, "data");
+const LB_PATH = join(DATA_DIR, "leaderboard.json");
+const LB_TOP = 10;
+const NICK_MAX = 20;
+
+let leaderboard = {}; // { [puzzleId]: [{ nickname, score, chars, at }] }
+if (existsSync(LB_PATH)) {
+  try {
+    leaderboard = JSON.parse(await readFile(LB_PATH, "utf8"));
+  } catch (e) {
+    console.warn(`couldn't read leaderboard: ${e.message}`);
+  }
+}
+let lbWriteQueued = false;
+async function persistLeaderboard() {
+  if (lbWriteQueued) return;
+  lbWriteQueued = true;
+  queueMicrotask(async () => {
+    lbWriteQueued = false;
+    try {
+      mkdirSync(DATA_DIR, { recursive: true });
+      await writeFile(LB_PATH, JSON.stringify(leaderboard, null, 2));
+    } catch (e) {
+      console.warn(`couldn't write leaderboard: ${e.message}`);
+    }
+  });
+}
+
+// Tokens minted by /api/generate, redeemed once by /api/leaderboard/submit.
+const scoreTokens = new Map(); // token -> { puzzleId, score, chars, prompt }
+
+function cleanNickname(raw) {
+  return String(raw || "")
+    .replace(/[\x00-\x1f\x7f]/g, "") // strip control chars
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, NICK_MAX);
+}
+
+function topFor(puzzleId) {
+  return (leaderboard[puzzleId] || [])
+    .slice()
+    .sort((a, b) => b.score - a.score || a.chars - b.chars || a.at - b.at)
+    .slice(0, LB_TOP)
+    .map(({ nickname, score, chars }) => ({ nickname, score, chars }));
+}
+
 // Strip puzzle SVG so the answer key never ships to the browser.
 app.get("/api/puzzles", (_req, res) => {
   res.json(puzzles.map(({ id, name }) => ({ id, name })));
 });
 
-// The renderer needs the target image to diff against, so it gets the SVG —
+// The renderer needs the target image to diff against, so it gets the SVG,
 // but only as a rasterized data source, and the player can't read network tabs
 // mid-game any more than they could screenshot the answer. Good enough for v0.
 app.get("/api/target/:id", (req, res) => {
@@ -138,22 +190,58 @@ app.post("/api/generate", async (req, res) => {
   if (!GEMINI_API_KEY)
     return res.status(503).json({ error: "engine offline: GEMINI_API_KEY not set" });
 
+  // Mint a one-time token bound to this server-measured score, so the board
+  // submission can't lie about the number.
+  const reply = (svg, score, cached) => {
+    const chars = prompt.length;
+    const token = randomUUID();
+    scoreTokens.set(token, { puzzleId, score, chars, prompt });
+    return res.json({ svg, score, chars, token, cached });
+  };
+
   const key = cacheKey(puzzleId, prompt);
   const hit = resultCache.get(key);
-  if (hit) return res.json({ ...hit, chars: prompt.length, cached: true });
+  if (hit) return reply(hit.svg, hit.score, true);
 
   try {
     const svg = await generateSvg(prompt);
     const score = Math.round(scoreMatch(target, rasterize(svg)) * 10) / 10;
-    const payload = { svg, score };
-    resultCache.set(key, payload);
-    res.json({ ...payload, chars: prompt.length });
+    resultCache.set(key, { svg, score });
+    reply(svg, score, false);
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });
   }
 });
 
+// Read a puzzle's top scores.
+app.get("/api/leaderboard/:id", (req, res) => {
+  res.json({ top: topFor(req.params.id) });
+});
+
+// Redeem a score token + nickname into a leaderboard row. Best score per
+// nickname per puzzle wins; resubmitting can only improve your own row.
+app.post("/api/leaderboard/submit", (req, res) => {
+  const token = String(req.body?.token || "");
+  const nickname = cleanNickname(req.body?.nickname);
+  if (!nickname) return res.status(400).json({ error: "nickname required" });
+  const scored = scoreTokens.get(token);
+  if (!scored) return res.status(400).json({ error: "invalid or used token" });
+  scoreTokens.delete(token); // one-time
+
+  const { puzzleId, score, chars } = scored;
+  const rows = (leaderboard[puzzleId] ||= []);
+  const mine = rows.find((r) => r.nickname === nickname);
+  const better = (s, c) => s > (mine?.score ?? -1) || (s === mine?.score && c < mine.chars);
+  if (!mine) {
+    rows.push({ nickname, score, chars, at: Date.now() });
+  } else if (better(score, chars)) {
+    Object.assign(mine, { score, chars, at: Date.now() });
+  }
+  persistLeaderboard();
+  res.json({ top: topFor(puzzleId) });
+});
+
 app.listen(PORT, () => {
   console.log(`daily-puzzle on http://localhost:${PORT}`);
-  if (!GEMINI_API_KEY) console.warn("warning: GEMINI_API_KEY not set — engine will 503");
+  if (!GEMINI_API_KEY) console.warn("warning: GEMINI_API_KEY not set, engine will 503");
 });

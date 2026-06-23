@@ -61,12 +61,30 @@ so we never pay the model twice for it.
 
 You get a single attempt per puzzle. The gate is `localStorage` (the Wordle
 model): once you submit, your attempt is saved and the input locks, and it stays
-locked across reloads. It's clearable in devtools — honest players get one try,
-and real anti-cheat (accounts + a leaderboard) is a later step, not an MVP need.
+locked across reloads. It's clearable in devtools, so honest players get one try
+and that's the level of enforcement an anonymous game can honestly claim.
+
+## Nickname + leaderboard
+
+There's no login. You pick a nickname (stored in `localStorage`) and it labels
+your row on a per-puzzle leaderboard. The board ranks by match first, character
+count as the tiebreaker, top 10.
+
+The score on the board is trustworthy even though there's no auth. The client
+never sends a score: when `/api/generate` measures your painting it issues a
+one-time token bound to that server-computed score, and `/api/leaderboard/submit`
+exchanges `{token, nickname}` for a row. So a player can pick any nickname, but
+the number beside it is one the server actually measured, and the token can't be
+replayed or forged. Best score per nickname per puzzle wins; resubmitting only
+improves your own row. The board persists to `data/leaderboard.json` (gitignored).
+
+This is casual-grade integrity, right for the stakes. The nickname is claimable
+(two people can both be "greg"), which is the thing real accounts would fix once
+there's something worth protecting.
 
 ## Status
 
-v0 prototype. Single-shot with server-side scoring and a localStorage gate, six
-built-in puzzles, no daily rotation or leaderboard yet. Next obvious steps: a
-real "puzzle of the day," a shareable result card, and accounts once there's a
-competitive leaderboard worth protecting.
+v0 prototype. Single-shot with server-side scoring, a localStorage one-shot gate,
+nickname chooser, and a per-puzzle leaderboard. Six built-in puzzles, no daily
+rotation yet. Next obvious steps: a real "puzzle of the day," a share image, and
+real accounts if/when the leaderboard gets competitive enough to need them.
