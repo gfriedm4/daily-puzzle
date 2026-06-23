@@ -1,0 +1,25 @@
+name: Deploy
+
+# Push to main -> SSH into the droplet and run deploy.sh (git pull + rebuild).
+# Requires three repo secrets (Settings -> Secrets and variables -> Actions):
+#   DEPLOY_HOST     the droplet's public IP (e.g. 68.183.138.215)
+#   DEPLOY_USER     the SSH user (root)
+#   DEPLOY_SSH_KEY  a private key whose public half is in the droplet's
+#                   ~/.ssh/authorized_keys
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            'cd ~/wordshot && ./deploy.sh'
