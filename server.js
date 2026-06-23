@@ -420,7 +420,21 @@ async function moderatePrompt(prompt) {
 // parallel with moderation, and fails OPEN — the regex is the guaranteed floor,
 // so on an API hiccup we'd rather let a clever prompt through than falsely reject
 // a legit one mid-game.
-const NAMING_JUDGE_INSTRUCTION = `You referee a "describe it without naming it" drawing game, like the gameshow Password. The player recreates a target picture by describing it to an image engine, WITHOUT naming what it is. You get the target's name, a list of banned words, and the player's prompt. BLOCK only if the prompt names the subject directly, uses an obvious abbreviation or misspelling of a banned word (e.g. "crcl" for circle), or uses a clear one-word synonym for it (e.g. "orb" or "disc" for a circle). ALLOW prompts that describe the subject indirectly through its shape, parts, colors, position, or comparisons. When unsure, ALLOW — catch deliberate naming, don't punish creative description. Reply with exactly one word: ALLOW or BLOCK.`;
+const NAMING_JUDGE_INSTRUCTION = `You referee a "describe it without naming it" drawing game, like the gameshow Password. The player recreates a target picture by describing it to an image engine, and the ONLY rule is they may not NAME what it is. You get the target's name, a list of banned words, and the player's prompt.
+
+BLOCK the prompt ONLY if it contains a naming word for the subject:
+- a banned word, or its misspelling/abbreviation (e.g. "trngl" or "tri-angle" for triangle)
+- a clear one-word synonym or symbol-name for it (e.g. "orb"/"disc" for a circle, "asterisk" for a star)
+
+ALLOW everything else, including descriptions that fully and obviously identify the target. Describing the shape by its structure is the whole point of the game, so it is always fine: number of sides, corners, or points; generic geometry words like "polygon", "shape", or "form"; colors; size; position; and comparisons to everyday objects. A prompt is NOT a violation just because it makes the answer obvious — only naming it is.
+
+Examples for a target whose banned word is "triangle":
+- "yellow 3 corner polygon" -> ALLOW (describes structure, never names it)
+- "shape with three sides" -> ALLOW
+- "a three-pointed wedge" -> ALLOW
+- "triangle" / "trngl" / "tri angle" -> BLOCK (names it)
+
+When unsure, ALLOW. Reply with exactly one word: ALLOW or BLOCK.`;
 
 async function judgeNaming(prompt, puzzle) {
   if (!GEMINI_API_KEY || !puzzle?.banned?.length) return { named: false };
