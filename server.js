@@ -1,8 +1,10 @@
 import express from "express";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { Resvg } from "@resvg/resvg-js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +31,43 @@ app.get("/favicon.ico", (_req, res) => res.status(204).end());
 const puzzles = JSON.parse(
   await readFile(join(__dirname, "puzzles", "puzzles.json"), "utf8")
 );
+
+// Scoring resolution. Both target and painting rasterize to this square, over
+// white, then we compare pixel for pixel. Small enough to be fast per request.
+const RENDER_SIZE = 256;
+
+function rasterize(svg) {
+  const r = new Resvg(svg, {
+    fitTo: { mode: "width", value: RENDER_SIZE },
+    background: "white",
+  });
+  return r.render().pixels; // RGBA buffer, opaque over white
+}
+
+// Average per-pixel color closeness, 0..100. 100 = identical bits.
+function scoreMatch(a, b) {
+  const maxDist = Math.sqrt(3 * 255 * 255);
+  let sum = 0;
+  const n = a.length / 4;
+  for (let i = 0; i < a.length; i += 4) {
+    const dr = a[i] - b[i];
+    const dg = a[i + 1] - b[i + 1];
+    const db = a[i + 2] - b[i + 2];
+    sum += 1 - Math.sqrt(dr * dr + dg * dg + db * db) / maxDist;
+  }
+  return (sum / n) * 100;
+}
+
+// Pre-rasterize every target once; scoring a submission is then one render +
+// one diff. The answer-key pixels live only on the server.
+const targetPixels = new Map(puzzles.map((p) => [p.id, rasterize(p.svg)]));
+
+// hash(puzzle, prompt) -> { svg, score }. Deterministic engine means the same
+// prompt on the same puzzle always lands the same image, so we never pay Gemini
+// twice for it. This is the cache the cost model leaned on.
+const resultCache = new Map();
+const cacheKey = (puzzleId, prompt) =>
+  createHash("sha256").update(`${puzzleId}\n${prompt}`).digest("hex");
 
 // Strip puzzle SVG so the answer key never ships to the browser.
 app.get("/api/puzzles", (_req, res) => {
@@ -90,14 +129,25 @@ function sanitizeSvg(raw) {
 
 app.post("/api/generate", async (req, res) => {
   const prompt = (req.body?.prompt || "").trim();
+  const puzzleId = String(req.body?.puzzleId || "");
+  const target = targetPixels.get(puzzleId);
+  if (!target) return res.status(400).json({ error: "unknown puzzle" });
   if (!prompt) return res.status(400).json({ error: "empty prompt" });
   if (prompt.length > 600)
     return res.status(400).json({ error: "prompt too long (max 600 chars)" });
   if (!GEMINI_API_KEY)
     return res.status(503).json({ error: "engine offline: GEMINI_API_KEY not set" });
+
+  const key = cacheKey(puzzleId, prompt);
+  const hit = resultCache.get(key);
+  if (hit) return res.json({ ...hit, chars: prompt.length, cached: true });
+
   try {
     const svg = await generateSvg(prompt);
-    res.json({ svg, chars: prompt.length });
+    const score = Math.round(scoreMatch(target, rasterize(svg)) * 10) / 10;
+    const payload = { svg, score };
+    resultCache.set(key, payload);
+    res.json({ ...payload, chars: prompt.length });
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });
   }

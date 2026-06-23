@@ -45,13 +45,28 @@ engine returns 503 and the rest of the UI still loads.
 
 ## Scoring
 
-Match % is the average per-pixel color closeness between your painting and the
-target (100 = identical). Character count is shown alongside — the design intent
-is to rank by match first, prompt length as the tiebreaker, so a shorter prompt
-at the same accuracy wins.
+Scoring happens on the server. Both the target and your painting are rasterized
+to a 256×256 square over white (via `@resvg/resvg-js`) and compared pixel for
+pixel; match % is the average per-pixel color closeness (100 = identical). The
+target pixels never leave the server, so the score can't be forged from the
+browser. Character count is shown alongside — the design intent is to rank by
+match first, prompt length as the tiebreaker, so a shorter prompt at the same
+accuracy wins.
+
+Because the engine is deterministic, results are cached by `hash(puzzle, prompt)`:
+the same prompt on the same puzzle is scored once and served from cache after,
+so we never pay the model twice for it.
+
+## One shot
+
+You get a single attempt per puzzle. The gate is `localStorage` (the Wordle
+model): once you submit, your attempt is saved and the input locks, and it stays
+locked across reloads. It's clearable in devtools — honest players get one try,
+and real anti-cheat (accounts + a leaderboard) is a later step, not an MVP need.
 
 ## Status
 
-v0 prototype. Single-shot, six built-in puzzles, no daily rotation or
-leaderboard yet. Next obvious steps: a real "puzzle of the day," server-side
-scoring so scores can't be faked, and a shareable result card.
+v0 prototype. Single-shot with server-side scoring and a localStorage gate, six
+built-in puzzles, no daily rotation or leaderboard yet. Next obvious steps: a
+real "puzzle of the day," a shareable result card, and accounts once there's a
+competitive leaderboard worth protecting.

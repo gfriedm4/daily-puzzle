@@ -1,56 +1,96 @@
 const $ = (id) => document.getElementById(id);
 const SIZE = 512;
 
-const targetCanvas = $("targetCanvas");
 const resultCanvas = $("resultCanvas");
-const tctx = targetCanvas.getContext("2d", { willReadFrequently: true });
-const rctx = resultCanvas.getContext("2d", { willReadFrequently: true });
+const tctx = $("targetCanvas").getContext("2d");
+const rctx = resultCanvas.getContext("2d");
 
-let targetData = null; // ImageData of current target, for diffing
 let currentPuzzle = null;
 
-// Render an SVG string onto a canvas over a white base, return the ImageData.
+// One-shot gate: once you've played a puzzle, your attempt is saved here and the
+// input locks. It's the Wordle model — clearable in devtools, but honest players
+// get one try. Real anti-cheat waits for accounts + a leaderboard.
+const saveKey = (id) => `dp:v1:${id}`;
+const getAttempt = (id) => {
+  try {
+    return JSON.parse(localStorage.getItem(saveKey(id)) || "null");
+  } catch {
+    return null;
+  }
+};
+const saveAttempt = (id, a) =>
+  localStorage.setItem(saveKey(id), JSON.stringify(a));
+
+// Paint an SVG string onto a canvas over white (display only — scoring is the
+// server's job now).
 function drawSvg(ctx, svg) {
   return new Promise((resolve, reject) => {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, SIZE, SIZE);
     const img = new Image();
-    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     img.onload = () => {
       ctx.drawImage(img, 0, 0, SIZE, SIZE);
-      resolve(ctx.getImageData(0, 0, SIZE, SIZE));
+      resolve();
     };
     img.onerror = () => reject(new Error("couldn't render that SVG"));
-    img.src = url;
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   });
 }
 
-// Per-pixel color closeness, averaged. 100 = identical, 0 = maximally different.
-function matchPct(a, b) {
-  const maxDist = Math.sqrt(3 * 255 * 255);
-  let sum = 0;
-  const n = a.data.length / 4;
-  for (let i = 0; i < a.data.length; i += 4) {
-    const dr = a.data[i] - b.data[i];
-    const dg = a.data[i + 1] - b.data[i + 1];
-    const db = a.data[i + 2] - b.data[i + 2];
-    sum += 1 - Math.sqrt(dr * dr + dg * dg + db * db) / maxDist;
-  }
-  return (sum / n) * 100;
+function setLocked(locked, note) {
+  $("prompt").disabled = locked;
+  $("paint").disabled = locked;
+  $("paint").textContent = locked ? "Played" : "Paint it";
+  if (locked && note) $("prompt").placeholder = note;
+}
+
+async function showResult(svg, score, chars, name) {
+  $("resultPh").style.display = "none";
+  resultCanvas.style.display = "block";
+  await drawSvg(rctx, svg);
+  $("resultTag").textContent = `${chars} chars`;
+  const p = score.toFixed(1);
+  const stars =
+    score >= 95 ? "🟩🟩🟩🟩🟩"
+    : score >= 90 ? "🟩🟩🟩🟩⬜"
+    : score >= 80 ? "🟩🟩🟩⬜⬜"
+    : score >= 65 ? "🟩🟩⬜⬜⬜"
+    : score >= 50 ? "🟩⬜⬜⬜⬜"
+    : "⬜⬜⬜⬜⬜";
+  $("result").innerHTML = `
+    <div class="score">
+      <span class="big">${p}%</span>
+      <span class="meta">match · ${chars} chars</span>
+    </div>
+    <div class="share">Daily Puzzle — ${name}\n${stars}  ${p}%  ·  ${chars} chars</div>`;
 }
 
 async function loadPuzzle(id) {
   currentPuzzle = id;
+  const name = $("puzzle").selectedOptions[0]?.textContent || "";
   const svg = await (await fetch(`/api/target/${id}`)).text();
-  targetData = await drawSvg(tctx, svg);
-  // clear prior result
-  resultCanvas.style.display = "none";
-  $("resultPh").style.display = "flex";
-  $("resultTag").textContent = "";
-  $("result").innerHTML = "";
+  await drawSvg(tctx, svg);
+
+  const prior = getAttempt(id);
+  if (prior) {
+    $("prompt").value = prior.prompt;
+    $("chars").textContent = prior.chars;
+    setLocked(true, "You've already played this one.");
+    await showResult(prior.svg, prior.score, prior.chars, name);
+  } else {
+    $("prompt").value = "";
+    $("prompt").placeholder = "e.g. a red circle in the middle on white";
+    $("chars").textContent = "0";
+    setLocked(false);
+    resultCanvas.style.display = "none";
+    $("resultPh").style.display = "flex";
+    $("resultTag").textContent = "";
+    $("result").innerHTML = "";
+  }
 }
 
 async function paint() {
+  if (getAttempt(currentPuzzle)) return; // already played
   const prompt = $("prompt").value.trim();
   if (!prompt) return;
   const btn = $("paint");
@@ -65,36 +105,15 @@ async function paint() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `error ${res.status}`);
 
-    const resultData = await drawSvg(rctx, data.svg);
-    $("resultPh").style.display = "none";
-    resultCanvas.style.display = "block";
-
-    const pct = matchPct(targetData, resultData);
-    const chars = prompt.length;
-    $("resultTag").textContent = `${chars} chars`;
-    showScore(pct, chars);
+    const name = $("puzzle").selectedOptions[0]?.textContent || "";
+    const attempt = { prompt, svg: data.svg, score: data.score, chars: data.chars };
+    saveAttempt(currentPuzzle, attempt);
+    setLocked(true, "You've already played this one.");
+    await showResult(data.svg, data.score, data.chars, name);
   } catch (e) {
     $("result").innerHTML = `<span class="err">${e.message}</span>`;
-  } finally {
     btn.disabled = false;
   }
-}
-
-function showScore(pct, chars) {
-  const p = pct.toFixed(1);
-  const name = $("puzzle").selectedOptions[0]?.textContent || "";
-  const stars = pct >= 95 ? "🟩🟩🟩🟩🟩"
-    : pct >= 90 ? "🟩🟩🟩🟩⬜"
-    : pct >= 80 ? "🟩🟩🟩⬜⬜"
-    : pct >= 65 ? "🟩🟩⬜⬜⬜"
-    : pct >= 50 ? "🟩⬜⬜⬜⬜"
-    : "⬜⬜⬜⬜⬜";
-  $("result").innerHTML = `
-    <div class="score">
-      <span class="big">${p}%</span>
-      <span class="meta">match · ${chars} chars</span>
-    </div>
-    <div class="share">Daily Puzzle — ${name}\n${stars}  ${p}%  ·  ${chars} chars</div>`;
 }
 
 async function init() {
@@ -108,11 +127,6 @@ async function init() {
   const ta = $("prompt");
   ta.addEventListener("input", () => ($("chars").textContent = ta.value.trim().length));
   $("paint").addEventListener("click", paint);
-  $("reset").addEventListener("click", () => {
-    ta.value = "";
-    $("chars").textContent = "0";
-    loadPuzzle(currentPuzzle);
-  });
   ta.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") paint();
   });
