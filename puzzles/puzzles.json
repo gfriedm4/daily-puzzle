@@ -1,0 +1,32 @@
+[
+  {
+    "id": "001",
+    "name": "Red dot",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#ffffff\"/><circle cx=\"256\" cy=\"256\" r=\"150\" fill=\"#e23d3d\"/></svg>"
+  },
+  {
+    "id": "002",
+    "name": "Circle and square",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#ffffff\"/><circle cx=\"160\" cy=\"256\" r=\"100\" fill=\"#e23d3d\"/><rect x=\"262\" y=\"156\" width=\"200\" height=\"200\" fill=\"#2d6cdf\"/></svg>"
+  },
+  {
+    "id": "003",
+    "name": "Dot in a box",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#ffffff\"/><rect x=\"106\" y=\"106\" width=\"300\" height=\"300\" fill=\"#2d6cdf\"/><circle cx=\"256\" cy=\"256\" r=\"90\" fill=\"#e23d3d\"/></svg>"
+  },
+  {
+    "id": "004",
+    "name": "RGB overlap",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#ffffff\"/><circle cx=\"200\" cy=\"220\" r=\"120\" fill=\"#e23d3d\" fill-opacity=\"0.75\"/><circle cx=\"312\" cy=\"220\" r=\"120\" fill=\"#3bb273\" fill-opacity=\"0.75\"/><circle cx=\"256\" cy=\"316\" r=\"120\" fill=\"#2d6cdf\" fill-opacity=\"0.75\"/></svg>"
+  },
+  {
+    "id": "005",
+    "name": "Yellow triangle",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#ffffff\"/><polygon points=\"256,90 432,420 80,420\" fill=\"#f2c81f\"/></svg>"
+  },
+  {
+    "id": "006",
+    "name": "Star on purple",
+    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#7a3fb3\"/><polygon points=\"256,80 305,210 442,210 332,290 372,420 256,340 140,420 180,290 70,210 207,210\" fill=\"#000000\"/></svg>"
+  }
+]

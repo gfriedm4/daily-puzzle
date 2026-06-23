@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Puzzle — describe the picture</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Daily Puzzle <span class="sub">prototype</span></h1>
+      <div class="sub">one shot · shortest prompt wins</div>
+    </header>
+    <p class="tagline">
+      On the left is the target. Describe it in words, the engine paints what you say, and you're scored on how close it lands. You get one shot, so make every word count.
+    </p>
+
+    <div class="boards">
+      <div class="board">
+        <div class="label"><span>Target</span><span id="targetName"></span></div>
+        <canvas id="targetCanvas" width="512" height="512"></canvas>
+      </div>
+      <div class="board">
+        <div class="label"><span>Your painting</span><span id="resultTag"></span></div>
+        <div class="ph" id="resultPh">your result shows up here</div>
+        <canvas id="resultCanvas" width="512" height="512" style="display:none"></canvas>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="puzzlepick">
+        <label for="puzzle">Puzzle</label>
+        <select id="puzzle"></select>
+      </div>
+      <textarea id="prompt" placeholder="e.g. a red circle in the middle on white" maxlength="600"></textarea>
+      <div class="row">
+        <button id="paint" class="primary">Paint it</button>
+        <button id="reset">Reset</button>
+        <span class="charcount"><b id="chars">0</b> chars</span>
+      </div>
+    </div>
+
+    <div class="result" id="result"></div>
+
+    <p class="hint">
+      The engine only knows flat shapes — circles, squares, triangles, stars. It can't see the target; it only has your words. <b>R</b>eload for a fresh attempt anytime.
+    </p>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

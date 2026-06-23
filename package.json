@@ -1,0 +1,17 @@
+{
+  "name": "daily-puzzle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One-shot prompt-to-picture game: describe the target, an LLM paints it as SVG, you're scored on pixel match.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
