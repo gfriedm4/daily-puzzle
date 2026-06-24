@@ -585,7 +585,10 @@ async function loadShowcase(date, isToday) {
     section.style.display = "none";
     return;
   }
-  const winners = (data && data.winners) || [];
+  // A leaderboard row counts as a "winning shot" only if its painting was
+  // actually captured. Days that predate play capture have scores but no svg —
+  // showing the header over empty placeholder cards just confuses people.
+  const winners = ((data && data.winners) || []).filter((w) => w.svg);
   if (!winners.length) {
     section.style.display = "none";
     return;
