@@ -231,7 +231,13 @@ function boardsFor(dayKey, me) {
 const EPOCH = "2026-06-18"; // day 0; backdates the seed puzzles as past days
 const DAY_MS = 86400000;
 const dayMs = (d) => Date.parse(`${d}T00:00:00Z`);
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// "Today" is keyed to US Eastern, so the daily puzzle resets at midnight ET for
+// everyone (one global boundary the shared leaderboard can agree on). en-CA
+// formats as YYYY-MM-DD; the timeZone option is DST-aware, so this tracks the
+// EST/EDT switch automatically without a date library.
+const ET_ZONE = "America/New_York";
+const etDateFmt = new Intl.DateTimeFormat("en-CA", { timeZone: ET_ZONE });
+const todayStr = () => etDateFmt.format(new Date());
 const dayIndex = (d) => Math.floor((dayMs(d) - dayMs(EPOCH)) / DAY_MS);
 const wrap = (i) => puzzles[((i % puzzles.length) + puzzles.length) % puzzles.length];
 

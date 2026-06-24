@@ -317,6 +317,7 @@ async function loadDay(date) {
   // late play is scored without being added.
   $("practiceTag").style.display = today ? "none" : "inline-block";
   $("practiceNote").style.display = today ? "none" : "block";
+  renderCountdown();
   loadLeaderboard(current.date);
 
   const svg = await (await fetch(`/api/target/${current.puzzleId}`)).text();
@@ -399,6 +400,54 @@ function dayLabel(d) {
   return `${d.date} · ${d.name}`;
 }
 
+// Puzzles reset at midnight US Eastern (server keys "today" to America/New_York).
+// Show a live countdown so the rollover isn't a surprise. Only on today's puzzle.
+let countdownTimer = null;
+// Read the current wall clock in ET via Intl (DST-aware, matches the server's
+// boundary exactly), then return ms until the next ET midnight.
+const etTimeFmt = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour12: false,
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+function msToNextEtMidnight() {
+  const now = new Date();
+  const parts = etTimeFmt.formatToParts(now);
+  const get = (t) => Number(parts.find((p) => p.type === t).value);
+  let h = get("hour");
+  if (h === 24) h = 0; // some engines render midnight as "24"
+  const secsIntoDay = h * 3600 + get("minute") * 60 + get("second");
+  return (86400 - secsIntoDay) * 1000 - now.getMilliseconds();
+}
+function renderCountdown() {
+  const el = $("countdown");
+  if (!el) return;
+  if (!current?.today) {
+    el.style.display = "none";
+    return;
+  }
+  let ms = msToNextEtMidnight();
+  if (ms <= 0) {
+    // Rolled over while the tab was open — pull the new day's puzzle.
+    el.textContent = "New puzzle now…";
+    init();
+    return;
+  }
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  el.style.display = "inline-block";
+  el.textContent = `Next puzzle in ${pad(h)}:${pad(m)}:${pad(s)} (midnight ET)`;
+}
+function startCountdown() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  renderCountdown();
+  countdownTimer = setInterval(renderCountdown, 1000);
+}
+
 async function init() {
   getPlayerId();
   const data = await (await fetch("/api/days")).json();
@@ -438,6 +487,7 @@ async function init() {
   $("whoName").textContent = getNick() || "guest";
 
   if (days.length) await loadDay(days[0].date); // today first
+  startCountdown();
 }
 
 init();
