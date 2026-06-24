@@ -472,80 +472,6 @@ async function moderatePrompt(prompt) {
   return { allowed: !verdict.startsWith("BLOCK") };
 }
 
-// The regex catches obvious spellings and devoweled abbreviations, but a wordlist
-// can't reach synonyms ("orb" for a circle) or pure description that still names
-// the thing. This LLM pass judges intent: did the player name the subject? It's a
-// separate verdict from safety moderation so the player-facing message can be
-// specific ("you named it") instead of the generic "not allowed". Runs in
-// parallel with moderation, and fails OPEN — the regex is the guaranteed floor,
-// so on an API hiccup we'd rather let a clever prompt through than falsely reject
-// a legit one mid-game.
-const NAMING_JUDGE_INSTRUCTION = `You referee a "describe it without naming it" drawing game, like the gameshow Password. The player recreates a target picture by describing it to an image engine, and the ONLY rule is they may not NAME what it is. You get the target's name, a list of banned words, and the player's prompt.
-
-BLOCK the prompt ONLY if it contains a naming word for the subject:
-- a banned word, or its misspelling/abbreviation (e.g. "trngl" or "tri-angle" for triangle)
-- a clear one-word synonym or symbol-name for it (e.g. "orb"/"disc" for a circle, "asterisk" for a star)
-
-ALLOW everything else, including descriptions that fully and obviously identify the target. Describing the shape by its structure is the whole point of the game, so it is always fine: number of sides, corners, or points; generic geometry words like "polygon", "shape", or "form"; colors; size; position; and comparisons to everyday objects. A prompt is NOT a violation just because it makes the answer obvious — only naming it is.
-
-Examples for a target whose banned word is "triangle":
-- "yellow 3 corner polygon" -> ALLOW (describes structure, never names it)
-- "shape with three sides" -> ALLOW
-- "a three-pointed wedge" -> ALLOW
-- "a yellow triangle" -> BLOCK: triangle
-- "yllo trngl" -> BLOCK: trngl
-
-Examples for a target whose banned word is "circle":
-- "concentric 0 side shapes overlapping" -> ALLOW (structure: zero sides)
-- "a round shape with no corners" -> ALLOW (structure: zero corners)
-- "three overlapping discs" -> BLOCK: discs (one-word synonym)
-- "a red orb" -> BLOCK: orb
-
-When unsure, ALLOW. Reply with "ALLOW", or "BLOCK: <word>" where <word> is the single offending word copied verbatim from the player's prompt (so they know exactly what to remove). Always include the word on a BLOCK.`;
-
-async function judgeNaming(prompt, puzzle) {
-  if (!GEMINI_API_KEY || !puzzle?.banned?.length) return { named: false };
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-  const context = `Target: ${puzzle.name}\nBanned words: ${puzzle.banned.join(", ")}\nPlayer prompt: ${prompt}`;
-  const body = {
-    systemInstruction: { parts: [{ text: NAMING_JUDGE_INSTRUCTION }] },
-    contents: [{ role: "user", parts: [{ text: context }] }],
-    generationConfig: { temperature: 0, maxOutputTokens: 16, thinkingConfig: { thinkingBudget: 0 } },
-    safetySettings: SAFETY_SETTINGS,
-  };
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) return { named: false }; // fail open; regex is the floor
-    const data = await r.json();
-    const verdict = (data?.candidates?.[0]?.content?.parts || [])
-      .map((p) => p.text || "")
-      .join("")
-      .trim();
-    if (!/^BLOCK/i.test(verdict)) return { named: false };
-    // "BLOCK: <word>" — pull the offending word so the player knows what to drop.
-    const colon = verdict.indexOf(":");
-    const word = colon >= 0
-      ? verdict.slice(colon + 1).trim().replace(/^["'`]+|["'`.\s]+$/g, "").split(/\s+/)[0]
-      : "";
-    // Guard against a hallucinated block. The judge is told to copy the
-    // offending word verbatim from the prompt; if it cites a word that isn't
-    // actually there (e.g. blocking a structural description like "0 side
-    // shapes" and naming "circle" anyway), that's a false positive. Fail open
-    // rather than reject a legit prompt with a nonsense "X gives it away" where
-    // X never appeared. A genuine synonym ("orb", "disc") is in the prompt, so
-    // it still blocks.
-    if (word && !String(prompt).toLowerCase().includes(word.toLowerCase()))
-      return { named: false };
-    return { named: true, word: word || null };
-  } catch {
-    return { named: false };
-  }
-}
-
 const NICK_MOD_INSTRUCTION = `You screen player nicknames for a family-friendly daily game. The nickname appears on a public leaderboard. BLOCK it if it contains or clearly evokes: profanity or slurs (any language, including creative/leetspeak spellings), sexual content, hate or harassment, violence, or impersonation of staff/admins. Plain harmless handles are fine. Reply with exactly one word: ALLOW or BLOCK.`;
 
 async function moderateNickname(nick) {
@@ -715,24 +641,17 @@ app.post("/api/generate", ...generateLimits, async (req, res) => {
       .status(400)
       .json({ error: "that prompt isn't allowed, try describing the picture" });
 
-  // Two LLM passes, run together so the player waits on one round-trip, not two:
-  // safety moderation, and the naming judge that catches synonyms/disguises the
-  // regex can't (the clever ~10% that cleared bannedWordHit above).
-  const [moderation, naming] = await Promise.all([
-    moderatePrompt(prompt),
-    judgeNaming(prompt, puzzle),
-  ]);
+  // Safety moderation only. The LLM naming judge used to run here too, catching
+  // synonyms/disguises the regex misses, but it hard-blocked words that weren't
+  // on the visible "Can't say" list — invisible false positives that cost the
+  // player their shot (e.g. "round" on the circle puzzle). Pulled it: the local
+  // bannedWordHit gate above (visible list + skeleton match for crcl/sircull) is
+  // the whole twist now, and if a word isn't on the row, it works.
+  const moderation = await moderatePrompt(prompt);
   if (!moderation.allowed)
     return res
       .status(400)
       .json({ error: "that prompt isn't allowed, try describing the picture" });
-  if (naming.named)
-    return res.status(400).json({
-      error: naming.word
-        ? `"${naming.word}" gives it away — describe the shape instead`
-        : "too close — that names what it is. describe it another way",
-      bannedWord: naming.word || true,
-    });
 
   const eligible = date === todayStr(); // only today's day feeds the leaderboard
 
