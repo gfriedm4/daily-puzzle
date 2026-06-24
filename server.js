@@ -480,6 +480,12 @@ Examples for a target whose banned word is "triangle":
 - "a yellow triangle" -> BLOCK: triangle
 - "yllo trngl" -> BLOCK: trngl
 
+Examples for a target whose banned word is "circle":
+- "concentric 0 side shapes overlapping" -> ALLOW (structure: zero sides)
+- "a round shape with no corners" -> ALLOW (structure: zero corners)
+- "three overlapping discs" -> BLOCK: discs (one-word synonym)
+- "a red orb" -> BLOCK: orb
+
 When unsure, ALLOW. Reply with "ALLOW", or "BLOCK: <word>" where <word> is the single offending word copied verbatim from the player's prompt (so they know exactly what to remove). Always include the word on a BLOCK.`;
 
 async function judgeNaming(prompt, puzzle) {
@@ -510,6 +516,15 @@ async function judgeNaming(prompt, puzzle) {
     const word = colon >= 0
       ? verdict.slice(colon + 1).trim().replace(/^["'`]+|["'`.\s]+$/g, "").split(/\s+/)[0]
       : "";
+    // Guard against a hallucinated block. The judge is told to copy the
+    // offending word verbatim from the prompt; if it cites a word that isn't
+    // actually there (e.g. blocking a structural description like "0 side
+    // shapes" and naming "circle" anyway), that's a false positive. Fail open
+    // rather than reject a legit prompt with a nonsense "X gives it away" where
+    // X never appeared. A genuine synonym ("orb", "disc") is in the prompt, so
+    // it still blocks.
+    if (word && !String(prompt).toLowerCase().includes(word.toLowerCase()))
+      return { named: false };
     return { named: true, word: word || null };
   } catch {
     return { named: false };
