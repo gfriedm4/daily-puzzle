@@ -261,7 +261,7 @@ function buildShareCard() {
   x.fillText("Wordshot", pad + 62, 68);
   const when = current?.today ? "Today" : current?.date || "";
   x.fillStyle = "#8c8678"; x.font = "24px Inter, system-ui, sans-serif";
-  x.fillText(`${when} · ${lastResult.name}`, pad, 128);
+  x.fillText(when, pad, 128);
 
   const panel = (cv, px, label) => {
     x.fillStyle = "#8c8678"; x.font = "600 18px Inter, system-ui, sans-serif";
@@ -377,7 +377,7 @@ async function loadLeaderboard(date) {
 async function loadDay(date) {
   current = days.find((d) => d.date === date) || days[0];
   const { name, today } = current;
-  $("lbPuzzle").textContent = `· ${today ? "Today" : current.date} · ${name}`;
+  $("lbPuzzle").textContent = `· ${today ? "Today" : current.date}`;
 
   // Past days are view-only: the board still shows that day's results, but a
   // late play is scored without being added.
@@ -465,8 +465,8 @@ async function paint() {
 }
 
 function dayLabel(d) {
-  if (d.today) return `Today · ${d.name}`;
-  return `${d.date} · ${d.name}`;
+  if (d.today) return "Today";
+  return d.date;
 }
 
 // Puzzles reset at midnight US Eastern (server keys "today" to America/New_York).
